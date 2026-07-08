@@ -430,11 +430,16 @@ Pace (D-8/D-9) always measures against the **contracted** goal; over-delivery re
 separate surplus, never folded into pace.
 
 ### 17.5 Playlist health watch
-Per playlist (feeds D-16 and the Intelligence tab): streams-per-follower, save rate,
-listener-territory mix, follower trajectory. Anomaly rule: stream spike with save rate
-< 20% of genre median → `playlist_risk` flag on the placement and a Today action — catch a
-botty playlist before the client's dashboard does. Risk-flagged playlists are excluded from
-auto-suggested placements until cleared by ops.
+Per playlist, built ONLY from fields the scrape actually yields (§17.10): attributed streams
+(S4A per-song playlist list) ÷ public playlist follower count = **streams-per-follower**;
+follower trajectory (public scrape); delivery shape (cliff the moment the placement ends =
+placement-dependent, no organic carry); plus two campaign-level context signals — the song's
+save rate and its algorithmic response (§17.9). Anomaly rule: stream rate far above the
+genre's streams-per-follower norm while the campaign's save rate sits under 20% of genre
+median AND algorithmic response is ~zero → `playlist_risk` flag on the placement and a Today
+action — catch a botty playlist before the client's dashboard does. (Save rate is song-level
+in S4A, so it corroborates; it is never attributed to a single playlist.) Risk-flagged
+playlists are excluded from auto-suggested placements until cleared by ops.
 
 ### 17.6 Vendor Portal surfacing (extends §4 — one schema, two views)
 The vendor portal (`../vendor-portal-mockup/`) must present the learned values honestly but
@@ -460,44 +465,78 @@ zero · learned values are recomputed from raw history (no self-reinforcing feed
 own outputs).
 
 ### 17.8 Playlist territory learning (the parsing pipeline behind D-16)
-D-16 defines `playlist_territory = [{country, sharePct}]` per playlist; this is how it gets
-LEARNED rather than hand-entered:
+**Feasibility note: S4A never exposes per-playlist geography** — location lives at
+artist level (top countries/cities) and, when the layout allows, song level. Territory
+profiles are therefore INFERRED, with confidence gates, never presented as scraped fact.
 
-- **Signal:** during a placement window, diff the artist's S4A listener-country distribution
-  against their pre-campaign baseline (captured at setup, same snapshot §5 storage). The
-  incremental listeners per country are attributed to the currently-active placements in
-  proportion to each placement's share of delivered streams that window.
-- **Accumulation:** each playlist keeps a running territory profile = recency-weighted
-  average of its attributed country splits across every campaign it has ever appeared in.
-  Confidence score = f(observation count); profiles under 3 observations render with a
-  "low confidence" chip, never presented as fact.
-- **Cold start:** vendor-declared territory (Edit Vendor fields) until 3 observations exist;
-  declared vs learned divergence >30 points on any country raises an ops review flag.
-- **Uses:** the Intelligence → Territory choropleth and Vendors top-countries column (both
-  already in the mockup) read ONLY this profile; campaign targeting ranks eligible
-  placements by learned share of the client's requested territories; and a **territory
-  mismatch alert** — client bought US-heavy, live delivery trending <50% requested geo by
-  mid-campaign → Today action before the client's dashboard tells them first.
+- **Signal:** country-share distribution for the campaign song (assumption A3, §17.10) —
+  fall back to artist-level country shares when song-level location isn't scrapeable.
+  Compute the delta vs the pre-campaign baseline snapshot (captured at setup, §5 storage).
+- **Attribution:** the incremental country-share delta is distributed across active
+  placements **proportional to each playlist's scraped stream count** for the song that
+  window (per-song playlist list, §17.10 — real numbers, not estimates).
+- **Training gates (all must pass before an observation counts):**
+  - artist-level fallback only trains when the campaign song ≥40% of the artist's period
+    streams (otherwise catalog noise swamps the delta);
+  - concurrency discount: >5 simultaneously active playlists → observation weight ÷2;
+    >10 → skip (unattributable);
+  - a playlist needs ≥3 accepted observations before its profile renders; under 3 it wears
+    a "low confidence" chip and is excluded from geo-ranked pitching.
+- **Cold start:** vendor-declared territory (Edit Vendor fields). Declared vs learned
+  divergence >30 points on any country → ops review flag.
+- **Uses:** Intelligence → Territory choropleth and the Vendors top-countries column read
+  ONLY this profile; geo-targeted campaigns rank eligible placements by learned share of
+  requested territories (confident profiles only); **territory mismatch alert** — client
+  bought US-heavy, song-level country mix trending <50% requested geo by mid-campaign →
+  Today action. The alert reads the song-level mix directly (no inference), so it works even
+  while playlist profiles are still low-confidence.
 
 ### 17.9 Algorithmic weight (which playlists wake up Spotify's algorithm)
-The existing "algorithmic lift" math, formalized as a learner — this is Spotify's analog of
-the SoundCloud potency score:
+Spotify's analog of the SoundCloud potency score. Two layers with very different certainty,
+and the spec keeps them apart:
 
-- **Campaign-level lift:** `algo_lift = streams from algorithmic sources (Radio, Discover
-  Weekly, Release Radar, autoplay/mixes, per S4A source breakdown) during campaign + 6-month
-  afterglow, minus the pre-campaign baseline rate.` Reported to clients as surplus — never
-  counted toward the contracted goal (D-1 stays vendor-attributed only) and never in payout
-  math.
-- **Playlist weight:** attribute lift back to placements by timing + stream share, then learn
-  per playlist: `weight = algorithmic streams triggered per 1K direct streams delivered`,
-  recency-weighted, normalized within genre (50 = genre median). The drivers Spotify's
-  algorithm actually watches — save rate and streams/listener from D-14 — are stored
-  alongside as explanatory features, so the Intelligence tab can say WHY a playlist is
-  heavy ("saves 2.1× genre median").
-- **Uses:** placement ranking prefers high-weight playlists over raw follower count (a 40K
-  playlist that reliably triggers Radio beats a sleepy 400K one); campaign projections quote
-  expected lift by genre ("similar campaigns saw +18-26% algorithmic tail"), which feeds the
-  §17.4 renewal radar; low-weight + low-save playlists corroborate the §17.5 risk flag
-  (botty playlists never trigger the algorithm — the two signals confirm each other).
+- **Campaign-level lift (measured, solid):** S4A's per-song source breakdown (assumption A2)
+  buckets streams into editorial / listener playlists / **algorithmic** / library. 
+  `algo_lift = algorithmic-bucket streams during campaign + 6-month afterglow, minus the
+  pre-campaign baseline rate.` Scraped directly; reported to clients as surplus — never
+  counted toward the contracted goal (D-1 stays vendor-attributed only), never in payouts.
+- **Playlist weight (attributed, heuristic — labeled as such):** distribute each week's
+  algorithmic-bucket streams across the placements that were live in the same and the
+  previous week, proportional to their scraped direct-stream counts. Learn per playlist:
+  `weight = algorithmic streams attributed per 1K direct streams`, recency-weighted,
+  normalized within genre (50 = genre median). Minimum 5 campaigns of history before a
+  weight renders; concurrency discount identical to §17.8; the Intelligence tab shows the
+  explanatory context (campaign save rate, streams/listener from D-14) so ops sees WHY,
+  and an "attributed, not measured" chip so nobody mistakes the layer.
+- **Uses:** placement ranking prefers high-weight playlists over raw follower count; genre
+  projections quote expected lift ranges ("similar campaigns saw +18-26% algorithmic
+  tail") feeding the §17.4 renewal radar; zero algo response + low save rate corroborates
+  the §17.5 risk flag (botty playlists never trigger the algorithm).
 - **Guardrail:** weight re-ranks placements and sets expectations. Goals, billing and
-  payouts remain on direct vendor-attributed delivery, and lift is always labeled as bonus.
+  payouts remain on direct vendor-attributed delivery; lift is always labeled bonus.
+
+### 17.10 S4A scraping data contract (what the learners are allowed to assume)
+Everything in §17 trains exclusively on these scraped fields. If a field breaks, the learner
+degrades per its fallback — nothing is ever imputed as zero (§17.7).
+
+| # | Field (scrape source) | Availability assumption | Feeds |
+|---|---|---|---|
+| A1 | Per-song daily: streams, listeners, saves, playlist adds (S4A song page) | Reliable | D-14 · 17.2 · 17.4 · 17.5 |
+| A2 | Per-song source breakdown: editorial / listener playlists / algorithmic / library (S4A "how listeners found this song") | Reliable; bucket names change with S4A redesigns — scrape by position + label map, version the schema | 17.9 |
+| A3 | Song-level top countries | **Verify in scraper spike**; artist-level top countries is the guaranteed fallback | 17.8 |
+| A4 | Per-song playlist list WITH stream counts per playlist (S4A song → Playlists / "Discovered on") | Reliable — this is the attribution ground truth | D-1 verification · 17.1 · 17.5 · 17.8 · 17.9 |
+| A5 | Artist-level: followers, listeners, top countries/cities (S4A audience) | Reliable | baselines · 17.8 fallback |
+| A6 | Public playlist page: follower count, owner, track count, last-updated (public web/API, not S4A) | Reliable | 17.5 · D-16 display |
+
+Operating rules:
+- **Cadence:** active campaigns 3×/day; afterglow monthly for 6 months (§5 refresh policy).
+- **Snapshots are append-only and schema-versioned**; every learner recomputes from raw
+  snapshots, so a scraper fix or an S4A redesign never poisons history — re-run the parser,
+  relearn.
+- **Baselines:** every campaign captures a pre-start snapshot of A1/A2/A3/A5 at setup;
+  no baseline → that campaign trains nothing (it still delivers and bills normally).
+- **Access loss** (client revokes S4A) → campaign drops out of training from that date;
+  existing profiles keep their last confidence, decaying per recency weighting.
+- **Scraper spike deliverable (dev, week 1):** confirm A2 bucket granularity and A3
+  song-level location on 3 real artist accounts before building §17.8/§17.9 parsers —
+  both learners have designed fallbacks, but confirming early picks the cheaper path.
