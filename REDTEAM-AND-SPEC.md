@@ -447,10 +447,57 @@ asymmetrically:
   pill (extends §4.1) — a vendor and an operator can never see different stall states.
 - `playlist_risk` flags show on the vendor's own playlists with the evidence and a dispute
   path (routes into the §4.4 communication bridge).
+- Vendors see their own playlists' **learned territory profile** (§17.8) and **algorithmic
+  weight** (§17.9) with the explanatory features — "your save rate is what makes this
+  playlist valuable" is the incentive that keeps inventory clean. Other vendors' playlists
+  stay invisible.
 - Score **never** changes payout math on either portal — D-6 stays untouched.
 
-### 17.7 Guardrails (all five learners)
+### 17.7 Guardrails (all seven learners)
 Ranking and alerts only · suggestions require ops sign-off · every applied suggestion writes
 an audit row · unknown values render as "—" and are excluded from training, never imputed as
 zero · learned values are recomputed from raw history (no self-reinforcing feedback on their
 own outputs).
+
+### 17.8 Playlist territory learning (the parsing pipeline behind D-16)
+D-16 defines `playlist_territory = [{country, sharePct}]` per playlist; this is how it gets
+LEARNED rather than hand-entered:
+
+- **Signal:** during a placement window, diff the artist's S4A listener-country distribution
+  against their pre-campaign baseline (captured at setup, same snapshot §5 storage). The
+  incremental listeners per country are attributed to the currently-active placements in
+  proportion to each placement's share of delivered streams that window.
+- **Accumulation:** each playlist keeps a running territory profile = recency-weighted
+  average of its attributed country splits across every campaign it has ever appeared in.
+  Confidence score = f(observation count); profiles under 3 observations render with a
+  "low confidence" chip, never presented as fact.
+- **Cold start:** vendor-declared territory (Edit Vendor fields) until 3 observations exist;
+  declared vs learned divergence >30 points on any country raises an ops review flag.
+- **Uses:** the Intelligence → Territory choropleth and Vendors top-countries column (both
+  already in the mockup) read ONLY this profile; campaign targeting ranks eligible
+  placements by learned share of the client's requested territories; and a **territory
+  mismatch alert** — client bought US-heavy, live delivery trending <50% requested geo by
+  mid-campaign → Today action before the client's dashboard tells them first.
+
+### 17.9 Algorithmic weight (which playlists wake up Spotify's algorithm)
+The existing "algorithmic lift" math, formalized as a learner — this is Spotify's analog of
+the SoundCloud potency score:
+
+- **Campaign-level lift:** `algo_lift = streams from algorithmic sources (Radio, Discover
+  Weekly, Release Radar, autoplay/mixes, per S4A source breakdown) during campaign + 6-month
+  afterglow, minus the pre-campaign baseline rate.` Reported to clients as surplus — never
+  counted toward the contracted goal (D-1 stays vendor-attributed only) and never in payout
+  math.
+- **Playlist weight:** attribute lift back to placements by timing + stream share, then learn
+  per playlist: `weight = algorithmic streams triggered per 1K direct streams delivered`,
+  recency-weighted, normalized within genre (50 = genre median). The drivers Spotify's
+  algorithm actually watches — save rate and streams/listener from D-14 — are stored
+  alongside as explanatory features, so the Intelligence tab can say WHY a playlist is
+  heavy ("saves 2.1× genre median").
+- **Uses:** placement ranking prefers high-weight playlists over raw follower count (a 40K
+  playlist that reliably triggers Radio beats a sleepy 400K one); campaign projections quote
+  expected lift by genre ("similar campaigns saw +18-26% algorithmic tail"), which feeds the
+  §17.4 renewal radar; low-weight + low-save playlists corroborate the §17.5 risk flag
+  (botty playlists never trigger the algorithm — the two signals confirm each other).
+- **Guardrail:** weight re-ranks placements and sets expectations. Goals, billing and
+  payouts remain on direct vendor-attributed delivery, and lift is always labeled as bonus.
