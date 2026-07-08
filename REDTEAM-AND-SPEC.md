@@ -382,3 +382,75 @@ The hand-drawn continent silhouettes looked wrong. Replaced with a **real world 
 
 ## 16. Revision 13 — territory map is now a choropleth
 Per request: each country is **shaded in a red intensity scaled to its stream share** (dark red = low, bright red = high), via `shadeFor()` mapping share→`hsl(0 s% l%)`. Removed all on-map markers, flags, % text labels and the pulsing animation. A small **color-scale legend** (low% → high%) sits in the header; shaded countries are still clickable → `openTerritory`. Country→share is matched by ISO-3166 numeric id (`CODE_ID`, normalized) against the world-atlas feature ids. The "By country" list + playlist×country matrix remain for exact numbers.
+
+## 17. Self-Learning (spec addition 2026-07-07) — ranking and alerts only, never pricing
+
+Same doctrine as the YouTube (`youtube-ops-mockup/SPEC.md` §6) and SoundCloud
+(`soundcloud-ops-mockup/SPEC.md` §6-9) portals: every completed campaign is a labeled
+experiment the system learns from. Learned values **re-rank and warn only** — they never
+change a sale price, a contracted goal, a vendor rate, or a payout. Billing math stays on
+D-6/D-7 exactly as specified above.
+
+### 17.1 Vendor Score (who gets pitched first)
+Per vendor, 0-100, recomputed when a campaign completes or a placement is verified:
+
+```
+score = 0.35·Delivery + 0.25·Retention + 0.25·Efficiency + 0.15·Responsiveness
+```
+- **Delivery** — delivered streams vs accepted allocation, last 10 campaigns, recency-weighted
+  (60-day half-life).
+- **Retention** — % of placements that stayed on-playlist through the campaign window
+  (early removals also raise the existing re-add/replace flow).
+- **Efficiency** — blended $ per 1K delivered vs the genre median (50 = median; rows with
+  unknown rate are excluded per D-7, never treated as $0).
+- **Responsiveness** — time from pitch → accept/reject/counter, capped.
+- Cold start: new vendors enter at 55 until 5 completed campaigns.
+- **Use:** ordering within D-11/D-12 — when a campaign is pitched (manual, marketplace, or
+  hybrid per D-15), eligible vendors are ranked by score. Eligibility itself (tier caps,
+  risk flag) stays a human-edited field. Score changes and promote/demote suggestions appear
+  in an ops-facing Learning panel and require sign-off, mirroring the other two portals.
+
+### 17.2 Delivery pace bands (stall detection + projection)
+Learn the daily-streams distribution (P10 / median / P90) per genre × goal-size bucket from
+completed campaigns. **Stall** = below the P10 band for 3 consecutive days — replaces the
+"no adds in 72h" blanket alert that produced 453 false criticals (§1B). Projected-at-end on
+the Performance tab reads the same bands. One-click remedy: re-pitch remaining streams to the
+next eligible vendors by score (existing re-pitch flow).
+
+### 17.3 Vendor trend baseline (formalizes D-10)
+`trend = sign( streams_per_day(last 7d) − streams_per_day(prior 28d, EXCLUDING the last 7d) )`
+This is the fix for "10 of 11 vendors trending down" (§1B) — the old calc compared a week
+against a window containing itself. D-10 is the only trend definition any surface may use.
+
+### 17.4 Goal calibration (renewal radar)
+Campaigns delivering >150% of contracted goal set `goal_underset = true` → Today
+"Opportunity" card → Flag for Sales (§5 renewal flag, now with a learned threshold: the
+150% default is configurable and the panel shows the distribution so ops can tune it).
+Pace (D-8/D-9) always measures against the **contracted** goal; over-delivery renders as a
+separate surplus, never folded into pace.
+
+### 17.5 Playlist health watch
+Per playlist (feeds D-16 and the Intelligence tab): streams-per-follower, save rate,
+listener-territory mix, follower trajectory. Anomaly rule: stream spike with save rate
+< 20% of genre median → `playlist_risk` flag on the placement and a Today action — catch a
+botty playlist before the client's dashboard does. Risk-flagged playlists are excluded from
+auto-suggested placements until cleared by ops.
+
+### 17.6 Vendor Portal surfacing (extends §4 — one schema, two views)
+The vendor portal (`../vendor-portal-mockup/`) must present the learned values honestly but
+asymmetrically:
+- Vendors **see their own** score, its four components, and its trend — transparency is the
+  behavior lever ("your retention dipped: two early removals last month").
+- Vendors see **why** they were or weren't pitched ("Tier 1 campaigns route by score; yours
+  is 71, top quartile is 84+") — but **never** another vendor's score, rank, or volume.
+- Pace warnings on a vendor's accepted campaigns come from the SAME §17.2 bands as the ops
+  pill (extends §4.1) — a vendor and an operator can never see different stall states.
+- `playlist_risk` flags show on the vendor's own playlists with the evidence and a dispute
+  path (routes into the §4.4 communication bridge).
+- Score **never** changes payout math on either portal — D-6 stays untouched.
+
+### 17.7 Guardrails (all five learners)
+Ranking and alerts only · suggestions require ops sign-off · every applied suggestion writes
+an audit row · unknown values render as "—" and are excluded from training, never imputed as
+zero · learned values are recomputed from raw history (no self-reinforcing feedback on their
+own outputs).
